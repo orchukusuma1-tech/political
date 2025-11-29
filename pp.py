@@ -1,19 +1,8 @@
-"""
-People Connect — Streamlit full-featured prototype
-Features:
- - Register/Login (password) + optional Email OTP (env-configurable)
- - Issue submission with file uploads (saved to ./uploads)
- - Priority, Region/Ward selection
- - Politician assignment (admin can assign)
- - Admin dashboard with analytics
- - Chat-style comments/messages per issue
- - Simple role-based views: citizen / politician / admin
- - SQLite storage (people_connect.db)
-"""
+
 import streamlit as st
 import sqlite3, os, io, smtplib, traceback
 from datetime import datetime, timedelta
-import bcrypt
+from passlib.hash import bcrypt
 import pandas as pd
 from collections import Counter
 import base64
@@ -101,12 +90,13 @@ init_db()
 # -----------------------------
 # Utility functions
 # -----------------------------
-def hash_password(pw: str) -> bytes:
-    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt())
+def hash_password(pw: str) -> str:
+    # returns the hashed password string
+    return bcrypt.hash(pw)
 
-def check_password(pw: str, hashed: bytes) -> bool:
+def check_password(pw: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(pw.encode(), hashed)
+        return bcrypt.verify(pw, hashed)
     except Exception:
         return False
 
@@ -130,8 +120,9 @@ def send_otp_email(to_email: str, otp: str):
 
 def save_file_streamlit(uploaded_file, issue_id):
     # Save to UPLOAD_DIR with unique name
-    ts = datetime.now().strftime("%Y%m%d%H%M%S")
-    filename = f"{ts}_{uploaded_file.name}"
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
+    filename = f"{ts}_{safe_name}"
     filepath = os.path.join(UPLOAD_DIR, filename)
     with open(filepath, "wb") as f:
         f.write(uploaded_file.getbuffer())
@@ -150,13 +141,15 @@ def create_user(name, email, password, role="citizen", region=None, ward=None):
         conn.commit()
         return True
     except Exception as e:
+        # Optionally log traceback for debugging
+        # st.write("Create user error:", e)
         return False
 
 def authenticate(email, password):
     c = conn.cursor()
     c.execute("SELECT id,name,email,password,role,region,ward FROM users WHERE email=?", (email.lower(),))
     row = c.fetchone()
-    if row and check_password(password, row[3]):
+    if row and row[3] is not None and check_password(password, row[3]):
         return {"id": row[0], "name": row[1], "email": row[2], "role": row[4], "region": row[5], "ward": row[6]}
     return None
 
@@ -368,7 +361,7 @@ st.sidebar.markdown("---")
 if user["role"] == "admin":
     st.sidebar.markdown("**Admin controls**")
     if st.sidebar.button("Create sample admin account"):
-        # create admin quickly for demo
+        # create admin quickly for demo (will fail silently if exists)
         create_user("Admin", "admin@example.com", "adminpass", "admin")
         st.sidebar.success("Admin created (admin@example.com / adminpass).")
 st.sidebar.markdown("---")
@@ -396,15 +389,16 @@ with left:
     if not issues:
         st.info("No issues found with current filters.")
     else:
-        # Sort by priority first (High -> Low) then created_at desc
+        # Sort by priority first (High -> Low) then id desc (newer first)
         priority_rank = {"High": 0, "Medium": 1, "Low": 2}
-        issues_sorted = sorted(issues, key=lambda r: (priority_rank.get(r[5] or "Medium"), r[0]), reverse=False)
+        issues_sorted = sorted(issues, key=lambda r: (priority_rank.get(r[5] or "Medium"), -int(r[0])))
         for issue in issues_sorted:
             (iid, title, desc, region, ward, priority, location, status, created_by, created_at, assigned_to) = issue
-            # load creator name
+            # load creator name safely
             c = conn.cursor()
             c.execute("SELECT name FROM users WHERE id=?", (created_by,))
-            creator_name = c.fetchone()[0] if c.fetchone() is not None else "Unknown"
+            creator_row = c.fetchone()
+            creator_name = creator_row[0] if creator_row else "Unknown"
             # card-like display
             st.markdown("---")
             cols = st.columns([0.9, 2.5, 1.2, 0.6])
@@ -420,7 +414,6 @@ with left:
                 if files:
                     for fid, fname, fpath, futc in files:
                         try:
-                            # create download link
                             with open(fpath, "rb") as f:
                                 data = f.read()
                                 b64 = base64.b64encode(data).decode()
