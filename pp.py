@@ -1,8 +1,19 @@
-
+"""
+People Connect — Streamlit full-featured prototype
+Features:
+ - Register/Login (password) + optional Email OTP (env-configurable)
+ - Issue submission with file uploads (saved to ./uploads)
+ - Priority, Region/Ward selection
+ - Politician assignment (admin can assign)
+ - Admin dashboard with analytics
+ - Chat-style comments/messages per issue
+ - Simple role-based views: citizen / politician / admin
+ - SQLite storage (people_connect.db)
+"""
 import streamlit as st
 import sqlite3, os, io, smtplib, traceback
 from datetime import datetime, timedelta
-from passlib.hash import bcrypt
+from passlib.hash import pbkdf2_sha256
 import pandas as pd
 from collections import Counter
 import base64
@@ -33,9 +44,11 @@ st.title("People Connect — Citizens ↔ Politicians (Prototype)")
 # -----------------------------
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # Use row factory if you want dict-like rows later
     return conn
 
 conn = get_conn()
+
 def init_db():
     c = conn.cursor()
     # users: roles = citizen, politician, admin
@@ -43,7 +56,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
         email TEXT UNIQUE,
-        password BLOB,
+        password TEXT,
         role TEXT,
         region TEXT,
         ward TEXT,
@@ -91,12 +104,12 @@ init_db()
 # Utility functions
 # -----------------------------
 def hash_password(pw: str) -> str:
-    # returns the hashed password string
-    return bcrypt.hash(pw)
+    """Hash password using pbkdf2_sha256 (pure-Python, safe for deploy)."""
+    return pbkdf2_sha256.hash(pw)
 
 def check_password(pw: str, hashed: str) -> bool:
     try:
-        return bcrypt.verify(pw, hashed)
+        return pbkdf2_sha256.verify(pw, hashed)
     except Exception:
         return False
 
@@ -119,7 +132,7 @@ def send_otp_email(to_email: str, otp: str):
         st.write(msg)
 
 def save_file_streamlit(uploaded_file, issue_id):
-    # Save to UPLOAD_DIR with unique name
+    # Save to UPLOAD_DIR with unique name and safe characters
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
     filename = f"{ts}_{safe_name}"
@@ -140,9 +153,7 @@ def create_user(name, email, password, role="citizen", region=None, ward=None):
                   (name, email.lower(), hashed, role, region, ward, datetime.utcnow().isoformat()))
         conn.commit()
         return True
-    except Exception as e:
-        # Optionally log traceback for debugging
-        # st.write("Create user error:", e)
+    except Exception:
         return False
 
 def authenticate(email, password):
@@ -156,8 +167,7 @@ def authenticate(email, password):
 def get_user_by_email(email):
     c = conn.cursor()
     c.execute("SELECT id,name,email,role,region,ward FROM users WHERE email=?", (email.lower(),))
-    r = c.fetchone()
-    return r
+    return c.fetchone()
 
 def create_issue(title, description, region, ward, priority, location, created_by):
     c = conn.cursor()
@@ -389,7 +399,7 @@ with left:
     if not issues:
         st.info("No issues found with current filters.")
     else:
-        # Sort by priority first (High -> Low) then id desc (newer first)
+        # Sort by priority first (High -> Low) then newest first (id desc)
         priority_rank = {"High": 0, "Medium": 1, "Low": 2}
         issues_sorted = sorted(issues, key=lambda r: (priority_rank.get(r[5] or "Medium"), -int(r[0])))
         for issue in issues_sorted:
