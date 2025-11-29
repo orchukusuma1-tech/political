@@ -1,7 +1,7 @@
 streamlit
-bcrypt
+passlib
 pandas
 matplotlib
-python-dotenv
 jinja2
 twilio
+
