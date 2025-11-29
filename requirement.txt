@@ -2,6 +2,6 @@ streamlit
 passlib
 pandas
 matplotlib
-jinja2
+python-dotenv
 twilio
-
+PyJWT
