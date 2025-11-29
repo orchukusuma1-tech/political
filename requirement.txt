@@ -1,12 +1,7 @@
 streamlit
 bcrypt
-pillow
-python-dotenv
-twilio
-matplotlib
 pandas
-numpy
-email-validator
-python-jose
-smtplib
-sqlite-utils
+matplotlib
+python-dotenv
+jinja2
+twilio
