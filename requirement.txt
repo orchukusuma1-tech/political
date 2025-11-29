@@ -1,7 +1,4 @@
 streamlit
-passlib
 pandas
-matplotlib
+passlib
 python-dotenv
-twilio
-PyJWT
